@@ -1,4 +1,5 @@
-<img width="925" alt="image" src="https://github.com/user-attachments/assets/e8c5e1bf-0437-436c-bbc1-c5f81ebdd26a" />
+<img width="925" alt="image" src="https://github.com/user-attachments/assets/dc4f172a-bf42-4693-ae2f-7c6a1e2fd502" />
+
 
 # OmniFocus 4 批量生成子任务插件
 ### 插件简介
