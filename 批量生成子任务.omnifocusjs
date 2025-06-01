@@ -1,0 +1,191 @@
+/*{
+  "author": "q36zhd46w17o",
+  "targets": ["omnifocus"],
+  "type": "action",
+  "identifier": "com.mycompany.createSpacedTasks",
+  "version": "0.1",
+  "description": "在选中的父任务下批量生成子任务，并依次推迟开始日期",
+  "label": "批量生成子任务",
+  "mediumLabel": "批量生成子任务",
+  "longLabel": "批量生成子任务",
+  "paletteLabel": "批量生成子任务"
+}*/
+
+(() => {
+  const action = new PlugIn.Action(async function (selection) {
+    console.log("⚡️ 插件触发，当前选择的父对象 =", selection.tasks.length > 0 ? selection.tasks[0] : selection.projects[0]);
+    const parent = selection.tasks.length > 0 ? selection.tasks[0] : selection.projects[0];
+    if (!parent) {
+      (new Alert('请选择父任务', '运行前请在 OmniFocus 中选中目标任务')).show();
+      return;
+    }
+
+    // 只有在父任务是 Project 或 TaskGroup 时才设置这些属性
+    try {
+      // “用最后一个动作完成” (官方：completedByChildren)
+      if (typeof parent.completedByChildren !== 'undefined') {
+        parent.completedByChildren = true;
+      }
+      if (typeof parent.sequential !== 'undefined') {
+        parent.sequential = true;
+      }
+    } catch (_) {
+      // 忽略设置失败的情况
+    }
+
+    const form = new Form();
+    form.addField(new Form.Field.String('count', '创建任务', '7'));
+    form.addField(new Form.Field.String('step',  '每隔',     '1'));
+
+    // 时间单位（默认“天”：放在首位即可成为默认）
+    const unitField = new Form.Field.Option(
+      'unit',
+      '时间单位',
+      ['天', '分', '时', '周', '月', '年'],
+      null,     // names
+      '天',      // selected → 默认选“天”，并且不出现“无值”
+      null      // nullOptionTitle
+    );
+    form.addField(unitField);
+
+    // 子任务持续时间（分钟）
+    form.addField(new Form.Field.String('duration', '每个子任务持续(分钟)', '2'));
+
+    // 数字格式
+    const numFmtField = new Form.Field.Option(
+      'numFmt',
+      '数字格式',
+      ['汉字数字', '阿拉伯数字'],
+      null,
+      '汉字数字',
+      null
+    );
+    form.addField(numFmtField);
+
+    // 量词单位
+    const measureField = new Form.Field.Option(
+      'measure',
+      '量词单位',
+      ['天', '次'],
+      null,
+      '天',
+      null
+    );
+    form.addField(measureField);
+
+    // 时区（默认“东京”）
+    const tzField = new Form.Field.Option(
+      'tz',
+      '时区',
+      ['东京', '北京'],
+      null,
+      '东京',
+      null
+    );
+    form.addField(tzField);
+
+    const result = await form.show('批量生成子任务', '创建');
+    console.log("表单返回值 =", result);
+    if (!result) return;
+
+    const total = parseInt(result.values.count, 10);
+    const step  = parseInt(result.values.step,  10);
+    const unit  = result.values.unit;
+    const durationMin = parseInt(result.values.duration, 10);
+    const numFmt      = result.values.numFmt;
+    const measure     = result.values.measure;
+    const tz          = result.values.tz;           // 所选时区
+
+    // 以本机时区为基准，计算所选时区与本机时区的小时差
+    const localOffsetHours  = -new Date().getTimezoneOffset() / 60; // 例如东京=9，北京=8
+    const tzOffsets         = { '东京': 9, '北京': 8 };
+    const selectedOffset    = tzOffsets[tz] ?? localOffsetHours;    // 若不在表内则默认为本机
+    const tzDeltaHours      = localOffsetHours - selectedOffset;    // 正值 ⇒ 本地 +Nh；负值 ⇒ 本地 −Nh
+
+    // 父任务的估算时长（单位：分钟），如果没有则设为 null
+    const parentEstimate = parent.estimatedMinutes || null;   // official API
+    // 计算每个子任务的估算时间（向下取整）
+    const childEstimate = parentEstimate ? Math.floor(parentEstimate / total) : null;
+    // 父任务的 Due/Defer 日期
+    // 每次运行都以“所选时区中的今天 00:00”为起点
+    const parentDue   = parent.dueDate;
+    const todayMidnight = new Date();
+    todayMidnight.setHours(0, 0, 0, 0);          // 本地 00:00
+    todayMidnight.setHours(todayMidnight.getHours() + tzDeltaHours); // 换算到所选时区
+    parent.deferDate = todayMidnight;
+    const parentDefer = parent.deferDate;
+
+    if (!(total > 0 && step > 0)) {
+      (new Alert('输入错误', '“要创建几条任务”和“每隔多少”必须都大于 0')).show();
+      return;
+    }
+
+    function addInterval(date, n, unit) {
+      const d = new Date(date);
+      switch (unit) {
+        case '分':   d.setMinutes(d.getMinutes() + n);   break;
+        case '时':   d.setHours(d.getHours() + n);       break;
+        case '天':   d.setDate(d.getDate() + n);         break;
+        case '周':   d.setDate(d.getDate() + n * 7);     break;
+        case '月':   d.setMonth(d.getMonth() + n);       break;
+        case '年':   d.setFullYear(d.getFullYear() + n); break;
+      }
+      return d;
+    }
+
+    const cnNums = ['零','一','二','三','四','五','六','七','八','九','十',
+                    '十一','十二','十三','十四','十五','十六','十七','十八','十九','二十',
+                    '二十一','二十二','二十三','二十四','二十五','二十六','二十七','二十八','二十九','三十'];
+    function formatNumber(n, fmt) {
+      if (fmt === '汉字数字') return cnNums[n];
+      return String(n);
+    }
+
+    const base = new Date();
+    // Document.beginUndoGrouping('批量生成子任务');
+    let lastDueDate = null;
+    for (let i = 1; i <= total; i++) {
+      try {
+        const numText = formatNumber(i, numFmt);
+        const title   = `第${numText}${measure}`;
+        const task = new Task(title, parent.ending);
+        // Remove all inherited tags (official API)
+        task.tags.forEach(tag => task.removeTag(tag));
+        // 1) 并行执行
+        task.parallel = true;
+        if (durationMin > 0) {
+          // official API: estimatedMinutes is a Number
+          task.estimatedMinutes = durationMin;
+        } else if (childEstimate !== null) {
+          task.estimatedMinutes = childEstimate;
+        }
+
+        // 3) 计算子任务的 DueDate
+        if (unit === '天') {
+          const d = addInterval(parentDefer, (i - 1) * step, unit);
+          d.setHours(23 + tzDeltaHours, 59, 0, 0);
+          task.dueDate = d;
+        } else if (parentDue) {
+          task.dueDate = addInterval(parentDue, -(total - i) * step, unit);
+        }
+
+        // 4) 计算子任务的 DeferDate：父任务 DeferDate 往后推 (i - 1) * step 单位
+        if (parentDefer) {
+          task.deferDate = addInterval(parentDefer, (i - 1) * step, unit);
+        }
+
+        if (task.dueDate) lastDueDate = task.dueDate;
+      } catch (err) {
+        console.error("子任务创建过程中发生错误：", err);
+        break;
+      }
+    }
+    if (!parentDue && lastDueDate) {
+      parent.dueDate = lastDueDate;
+    }
+    // Document.endUndoGrouping();
+  });
+
+  action.validate = selection => (selection.tasks.length > 0 || selection.projects.length > 0);
+  return action;
+})();
