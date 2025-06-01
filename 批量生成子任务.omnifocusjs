@@ -3,7 +3,7 @@
   "targets": ["omnifocus"],
   "type": "action",
   "identifier": "com.github.q36zhd46w17o.omnifocus-batch-subtasks"
-  "version": "0.1",
+  "version": "0.1.0",
   "description": "在选中的父任务下批量生成子任务，并依次推迟开始日期",
   "label": "批量生成子任务",
   "mediumLabel": "批量生成子任务",
