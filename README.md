@@ -1,3 +1,5 @@
+<img width="925" alt="image" src="https://github.com/user-attachments/assets/e8c5e1bf-0437-436c-bbc1-c5f81ebdd26a" />
+
 # OmniFocus 4 批量生成子任务插件
 ### 插件简介
 一个可以在选中父任务下，批量生成子任务的 OmniFocus 插件。  
